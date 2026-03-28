@@ -255,3 +255,9 @@ if __name__ == "__main__":
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
         logging.error("Bot to'xtatildi!")
+async def main():
+    keep_alive()
+    # Mana shu qatorni qo'shing:
+    await bot.delete_webhook(drop_pending_updates=True) 
+    # Keyin polling boshlanadi:
+    await dp.start_polling(bot)
