@@ -42,9 +42,9 @@ def keep_alive():
 
 # --- SOZLAMALAR ---
 # Tokenni o'zgartirishni unutmang
-API_TOKEN = os.getenv('BOT_TOKEN') or "8232377176:AAE2rn6WIk4NslzAQw_ABKYJN0A7O3FaY94"
-ADMIN_ID = int(os.getenv('ADMIN_ID')) if os.getenv('ADMIN_ID') else 6205634567
-MOVIE_CHANNEL_ID = os.getenv('CHANNEL_ID') or "@Kino_movie_TMR"
+API_TOKEN = os.getenv('BOT_TOKEN') or "8459649720:AAEr3gOn5cz7NvLE7sdnnIvGSnjAr7ASzLc"
+ADMIN_ID = int(os.getenv('ADMIN_ID')) if os.getenv('ADMIN_ID') else 7339714216
+MOVIE_CHANNEL_ID = os.getenv('CHANNEL_ID') or "-1002619474183"
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
