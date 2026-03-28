@@ -10,11 +10,13 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
 # --- SOZLAMALAR ---
+# Token va IDlarni Render'dagi Environment Variables bo'limidan oladi
 API_TOKEN = os.getenv('BOT_TOKEN') or "8459649720:AAEr3gOn5cz7NvLE7sdnnIvGSnjAr7ASzLc"
 ADMIN_ID = int(os.getenv('ADMIN_ID')) if os.getenv('ADMIN_ID') else 7339714216
 MOVIE_CHANNEL_ID = os.getenv('CHANNEL_ID') or "-1002619474183"
-# Render taqdim etgan URL (masalan: https://loyiha.onrender.com)
-WEBHOOK_HOST = os.getenv('RENDER_EXTERNAL_URL') 
+
+# Render URL'i (masalan: https://loyiha-nomi.onrender.com)
+WEBHOOK_HOST = os.getenv('RENDER_EXTERNAL_URL')
 WEBHOOK_PATH = f'/webhook/{API_TOKEN}'
 WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 
@@ -42,7 +44,11 @@ cursor.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value
 cursor.execute("CREATE TABLE IF NOT EXISTS channels (id INTEGER PRIMARY KEY AUTOINCREMENT, link TEXT UNIQUE)")
 
 # Default sozlamalar
-defaults = [('sub_status', 'on'), ('btn_text', 'Boshqa kinolar'), ('btn_url', 'http://t.me/Kino_movie_TMR'), ('app_url', 'https://script.google.com/')]
+defaults = [
+    ('sub_status', 'on'), 
+    ('btn_text', 'Boshqa kinolar'), 
+    ('btn_url', 'http://t.me/Kino_movie_TMR')
+]
 for k, v in defaults:
     cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
 db.commit()
@@ -85,7 +91,7 @@ async def cmd_start(message: types.Message, command: CommandObject = None):
     cursor.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
     db.commit()
     
-    args = command.args # Saytdan kelgan kod (?start=123)
+    args = command.args # Saytdan kelgan start=123 parametri
     if user_id == ADMIN_ID and not args:
         await message.answer(f"{get_emo('admin')} Admin Panel", reply_markup=main_admin_kb(), parse_mode="HTML")
     else:
@@ -126,20 +132,28 @@ def webhook():
     if request.headers.get('content-type') == 'application/json':
         json_string = request.get_data().decode('utf-8')
         update = Update.model_validate_json(json_string)
+        # Webhook'dan kelgan xabarni asyncio loopga yuboramiz
         asyncio.run_coroutine_threadsafe(dp.feed_update(bot, update), asyncio.get_event_loop())
         return '', 200
     else:
         return '', 403
 
 async def on_startup():
-    await bot.set_webhook(WEBHOOK_URL, drop_pending_updates=True)
+    # Webhookni o'rnatishdan oldin eski ulanishlarni o'chiramiz
+    await bot.delete_webhook(drop_pending_updates=True)
+    await bot.set_webhook(WEBHOOK_URL)
     logging.info(f"Webhook set to: {WEBHOOK_URL}")
 
+# --- ASOSIY ISHGA TUSHIRISH (Python 3.10+ uchun) ---
 if __name__ == "__main__":
-    # Webhookni o'rnatish
-    loop = asyncio.get_event_loop()
+    port = int(os.environ.get('PORT', 8080))
+    
+    # Event loop'ni yaratish va o'rnatish
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
+    # Webhook'ni o'rnatish (Startup funksiyasi)
     loop.run_until_complete(on_startup())
     
-    # Flask serverni ishga tushirish
-    port = int(os.environ.get('PORT', 8080))
-    app.run(host='0.0.0.0', port=port)
+    # Flask serverni ishga tushirish (Debug o'chiq bo'lishi shart!)
+    app.run(host='0.0.0.0', port=port, debug=False)
