@@ -16,7 +16,7 @@ main_loop = None
 API_TOKEN = os.getenv('BOT_TOKEN') or "8459649720:AAEr3gOn5cz7NvLE7sdnnIvGSnjAr7ASzLc"
 ADMIN_ID = int(os.getenv('ADMIN_ID')) if os.getenv('ADMIN_ID') else 7339714216
 MOVIE_CHANNEL_ID = os.getenv('CHANNEL_ID') or "-1002619474183"
-WEBHOOK_HOST = os.getenv('RENDER_EXTERNAL_URL')
+WEBHOOK_HOST = os.getenv('https://kino-deeblink.onrender.com')
 WEBHOOK_PATH = f'/webhook/{API_TOKEN}'
 WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 
