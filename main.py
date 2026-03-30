@@ -2,29 +2,36 @@ import os
 import asyncio
 import logging
 import sqlite3
-from flask import Flask, request
+from flask import Flask
+from threading import Thread
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command, CommandObject
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, Update
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-
-# --- GLOBAL LOOP ---
-main_loop = None
 
 # --- SOZLAMALAR ---
 API_TOKEN = os.getenv('BOT_TOKEN') or "8459649720:AAEr3gOn5cz7NvLE7sdnnIvGSnjAr7ASzLc"
 ADMIN_ID = int(os.getenv('ADMIN_ID')) if os.getenv('ADMIN_ID') else 7339714216
 MOVIE_CHANNEL_ID = os.getenv('CHANNEL_ID') or "-1002619474183"
-WEBHOOK_HOST = os.getenv('https://kino-deeblink.onrender.com')
-WEBHOOK_PATH = f'/webhook/{API_TOKEN}'
-WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 
-# --- LOGGING VA BOT ---
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
+
+# --- WEBSERVER (Render o'chib qolmasligi uchun) ---
 app = Flask(__name__)
+@app.route('/')
+def home(): return "Bot is alive!"
+
+def run_webserver():
+    port = int(os.environ.get('PORT', 8080))
+    app.run(host='0.0.0.0', port=port)
+
+def keep_alive():
+    thread = Thread(target=run_webserver)
+    thread.daemon = True
+    thread.start()
 
 # --- PREMIUM EMOJILAR ---
 EMOJIS = {
@@ -41,7 +48,6 @@ db = sqlite3.connect(DB_NAME, check_same_thread=False)
 cursor = db.cursor()
 cursor.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY)")
 cursor.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)")
-cursor.execute("CREATE TABLE IF NOT EXISTS channels (id INTEGER PRIMARY KEY AUTOINCREMENT, link TEXT UNIQUE)")
 
 defaults = [
     ('sub_status', 'on'), ('btn_text', 'Boshqa kino kodlari'), 
@@ -58,7 +64,7 @@ class AdminStates(StatesGroup):
     waiting_for_app_url = State()
     waiting_for_ad_text = State()
 
-# --- TUGMALAR (Sizning kodingizdagidek) ---
+# --- TUGMALAR ---
 def main_admin_kb():
     return ReplyKeyboardMarkup(keyboard=[
         [KeyboardButton(text="📊 Statistika"), KeyboardButton(text="📢 Reklama yuborish")],
@@ -71,10 +77,7 @@ def settings_kb():
     cursor.execute("SELECT value FROM settings WHERE key='sub_status'")
     status = cursor.fetchone()[0]
     sub_text = "🔴 Obuna: O'CHIQ" if status == 'off' else "🟢 Obuna: YOQIQ"
-    return ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text=sub_text)],
-        [KeyboardButton(text="⬅️ Ortga")]
-    ], resize_keyboard=True)
+    return ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text=sub_text)], [KeyboardButton(text="⬅️ Ortga")]], resize_keyboard=True)
 
 def get_inline_button():
     cursor.execute("SELECT value FROM settings WHERE key='btn_text'"); t = cursor.fetchone()[0]
@@ -85,89 +88,44 @@ def get_inline_button():
         [InlineKeyboardButton(text="📱 Ilovani ochish", web_app=types.WebAppInfo(url=app_url))]
     ])
 
-# --- OBUNA TEKSHIRISH ---
+# --- STATUS TEKSHIRISH ---
 async def get_user_status(user_id: int) -> bool:
     cursor.execute("SELECT value FROM settings WHERE key='sub_status'")
     if cursor.fetchone()[0] == 'off': return True
     try:
         m = await bot.get_chat_member(MOVIE_CHANNEL_ID, user_id)
-        if m.status not in ['member', 'administrator', 'creator']: return False
+        return m.status in ['member', 'administrator', 'creator']
     except: return False
-    return True
 
 # --- HANDLERLAR ---
-
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message, command: CommandObject = None):
     user_id = message.from_user.id
     cursor.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
     db.commit()
-    
-    args = command.args # Deep Linking (Saytdan kelgan kod)
-    
+    args = command.args
     if user_id == ADMIN_ID and not args:
         await message.answer(f"{get_emo('admin')} <b>Admin panel</b>", reply_markup=main_admin_kb(), parse_mode="HTML")
     else:
         if await get_user_status(user_id):
             if args and args.isdigit():
-                try:
-                    await bot.copy_message(message.chat.id, MOVIE_CHANNEL_ID, int(args), reply_markup=get_inline_button())
-                except:
-                    await message.answer(f"{get_emo('not_found')} <b>Kino topilmadi!</b>", parse_mode="HTML")
-            else:
-                await message.answer(f"{get_emo('welcome')} <b>Xush kelibsiz!</b>\n\nKino kodini yuboring 🎥", parse_mode="HTML")
-        else:
-            await message.answer(f"{get_emo('sub')} <b>Kanalga a'zo bo'ling!</b>", reply_markup=get_inline_button(), parse_mode="HTML")
+                try: await bot.copy_message(message.chat.id, MOVIE_CHANNEL_ID, int(args), reply_markup=get_inline_button())
+                except: await message.answer(f"{get_emo('not_found')} Kino topilmadi!", parse_mode="HTML")
+            else: await message.answer(f"{get_emo('welcome')} <b>Xush kelibsiz!</b>\n\nKino kodini yuboring 🎥", parse_mode="HTML")
+        else: await message.answer(f"{get_emo('sub')} <b>Kanalga a'zo bo'ling!</b>", reply_markup=get_inline_button(), parse_mode="HTML")
 
-# --- ADMIN EDIT HANDLERS ---
-@dp.message(F.text == "📝 Tugma matni", F.from_user.id == ADMIN_ID)
-async def edit_t(message: types.Message, state: FSMContext):
-    await message.answer("Yangi tugma matnini yuboring:")
-    await state.set_state(AdminStates.waiting_for_btn_text)
-
-@dp.message(F.text == "🔗 Tugma linki", F.from_user.id == ADMIN_ID)
-async def edit_u(message: types.Message, state: FSMContext):
-    await message.answer("Yangi tugma linkini yuboring:")
-    await state.set_state(AdminStates.waiting_for_btn_url)
-
-@dp.message(F.text == "📱 Ilova linki", F.from_user.id == ADMIN_ID)
-async def edit_a(message: types.Message, state: FSMContext):
-    await message.answer("Yangi Ilova (Apps Script) linkini yuboring:")
-    await state.set_state(AdminStates.waiting_for_app_url)
-
-# --- SAVE HANDLERS ---
-@dp.message(AdminStates.waiting_for_btn_text)
-async def s_t(message: types.Message, state: FSMContext):
-    cursor.execute("UPDATE settings SET value=? WHERE key='btn_text'", (message.text,))
-    db.commit(); await message.answer("✅ Saqlandi!", reply_markup=main_admin_kb()); await state.clear()
-
-@dp.message(AdminStates.waiting_for_btn_url)
-async def s_u(message: types.Message, state: FSMContext):
-    if "http" in message.text:
-        cursor.execute("UPDATE settings SET value=? WHERE key='btn_url'", (message.text,))
-        db.commit(); await message.answer("✅ Saqlandi!", reply_markup=main_admin_kb()); await state.clear()
-    else: await message.answer("❌ Xato link!")
-
-@dp.message(AdminStates.waiting_for_app_url)
-async def s_a(message: types.Message, state: FSMContext):
-    if "http" in message.text:
-        cursor.execute("UPDATE settings SET value=? WHERE key='app_url'", (message.text,))
-        db.commit(); await message.answer("✅ Saqlandi!", reply_markup=main_admin_kb()); await state.clear()
-    else: await message.answer("❌ Xato link!")
-
-# --- KINO SEARCH ---
 @dp.message(F.text.regexp(r'^\d+$'))
 async def search_movie(message: types.Message):
     if not await get_user_status(message.from_user.id):
-        await message.answer(f"{get_emo('sub')} <b>Avval a'zo bo'ling!</b>", reply_markup=get_inline_button(), parse_mode="HTML")
+        await message.answer("Avval a'zo bo'ling!", reply_markup=get_inline_button())
         return
-    wait = await message.answer(f"{get_emo('search')} <b>Qidirilmoqda...</b>", parse_mode="HTML")
+    wait = await message.answer(f"{get_emo('search')} Qidirilmoqda...", parse_mode="HTML")
     try:
         await bot.copy_message(message.chat.id, MOVIE_CHANNEL_ID, int(message.text), reply_markup=get_inline_button())
         await wait.delete()
-    except: await wait.edit_text(f"{get_emo('not_found')} <b>Topilmadi!</b>", parse_mode="HTML")
+    except: await wait.edit_text(f"{get_emo('not_found')} Topilmadi!", parse_mode="HTML")
 
-# --- QOLGAN ADMIN FUNKSIYALAR ---
+# --- ADMIN FUNKSIYALARI (Siz yuborgan koddagi kabi) ---
 @dp.message(F.text == "📊 Statistika", F.from_user.id == ADMIN_ID)
 async def stats(m: types.Message):
     cursor.execute("SELECT COUNT(*) FROM users")
@@ -188,8 +146,7 @@ async def ad_f(m: types.Message, state: FSMContext):
     await m.answer(f"✅ {c} kishiga yuborildi."); await state.clear()
 
 @dp.message(F.text == "⚙️ Sozlamalar", F.from_user.id == ADMIN_ID)
-async def sets(m: types.Message):
-    await m.answer("⚙️ Sozlamalar", reply_markup=settings_kb())
+async def sets(m: types.Message): await m.answer("⚙️ Sozlamalar", reply_markup=settings_kb())
 
 @dp.message(F.text.contains("Obuna:"), F.from_user.id == ADMIN_ID)
 async def toggle(m: types.Message):
@@ -199,30 +156,18 @@ async def toggle(m: types.Message):
     db.commit(); await m.answer(f"✅ Status: {new}", reply_markup=settings_kb())
 
 @dp.message(F.text == "⬅️ Ortga", F.from_user.id == ADMIN_ID)
-async def back(m: types.Message):
-    await m.answer("Asosiy panel", reply_markup=main_admin_kb())
+async def back(m: types.Message): await m.answer("Panel", reply_markup=main_admin_kb())
 
-# --- WEBHOOK LOGIKASI ---
-@app.route(WEBHOOK_PATH, methods=['POST'])
-def webhook():
-    if request.headers.get('content-type') == 'application/json':
-        json_string = request.get_data().decode('utf-8')
-        update = Update.model_validate_json(json_string)
-        asyncio.run_coroutine_threadsafe(dp.feed_update(bot, update), main_loop)
-        return 'OK', 200
-    return 'Forbidden', 403
-
-@app.route('/')
-def index(): return "Bot is alive and working!", 200
-
-async def on_startup():
+# --- ISHGA TUSHIRISH ---
+async def main():
+    keep_alive()
+    # MUHIM: Polling'dan oldin webhookni o'chirish shart
     await bot.delete_webhook(drop_pending_updates=True)
-    await bot.set_webhook(WEBHOOK_URL)
-    logging.info(f"Webhook set to: {WEBHOOK_URL}")
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    port = int(os.environ.get('PORT', 8080))
-    main_loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(main_loop)
-    main_loop.run_until_complete(on_startup())
-    app.run(host='0.0.0.0', port=port, debug=False)
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        logging.info("Bot stopped")
+        
